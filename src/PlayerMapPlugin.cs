@@ -72,6 +72,13 @@ namespace RepoPlayerMap
 
             if (Time.realtimeSinceStartup < _nextScanAt) return;
 
+            if (Input.GetKeyDown(KeyCode.F8))
+            {
+                Logger.LogInfo($"[{PluginName}] F8 pressed -> dumping all PlayerAvatars");
+                DumpAllPlayerAvatarControllers();
+            }
+
+
             _scanCount++;
             _nextScanAt = Time.realtimeSinceStartup + AutoScanIntervalSeconds;
 
@@ -118,9 +125,9 @@ namespace RepoPlayerMap
                 var tn = mb.GetType().FullName ?? "";
                 if (tn.IndexOf("Player", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     tn.IndexOf("Character", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    tn.IndexOf("Avatar", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    tn.IndexOf("Network", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    tn.IndexOf("Photon", StringComparison.OrdinalIgnoreCase) >= 0)
+                    tn.IndexOf("Avatar", StringComparison.OrdinalIgnoreCase) >= 0)
+                    // tn.IndexOf("Network", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    // tn.IndexOf("Photon", StringComparison.OrdinalIgnoreCase) >= 0)
                 {
                     var go = mb.gameObject;
                     Logger.LogInfo($"TYPE HIT: {tn} | GO: {go.name} | ACTIVE={go.activeInHierarchy} | POS={go.transform.position}");
@@ -145,9 +152,10 @@ namespace RepoPlayerMap
                 var n = go.name ?? "";
                 if (n.IndexOf("player", StringComparison.OrdinalIgnoreCase) >= 0 ||
                     n.IndexOf("character", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    n.IndexOf("avatar", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    n.IndexOf("network", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    n.IndexOf("photon", StringComparison.OrdinalIgnoreCase) >= 0)
+                    n.IndexOf("avatar", StringComparison.OrdinalIgnoreCase) >= 0 
+                    // n.IndexOf("network", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    // n.IndexOf("photon", StringComparison.OrdinalIgnoreCase) >= 0
+                    )
                 {
                     Logger.LogInfo($"NAME HIT: GO={go.name} | ACTIVE={go.activeInHierarchy} | POS={t.position}");
                     nameHits++;
@@ -165,48 +173,90 @@ namespace RepoPlayerMap
         // Attempt to find the local player's root transform based on known component types
         private Transform TryFindLocalPlayerRoot()
         {
-            // Strong candidates based on your scan results:
-            // - PlayerAvatar (component)
-            // - PlayerHealth (component)
-            // - PlayerAccess (component)
-            // - PlayerLocalCamera (component)
+            var all = Resources.FindObjectsOfTypeAll<MonoBehaviour>();
 
-            // Prefer PlayerAvatar first
-            var avatars = Resources.FindObjectsOfTypeAll<MonoBehaviour>();
-            foreach (var mb in avatars)
+            // 1️⃣ Best candidate: PlayerAvatar
+            foreach (var mb in all)
             {
                 if (mb == null) continue;
-                if (!mb.gameObject.scene.IsValid()) continue;
+                var go = mb.gameObject;
+                if (go == null) continue;
+                if (!go.scene.IsValid()) continue;
 
-                var tn = mb.GetType().Name;
-                if (tn == "PlayerAvatar")
-                    return mb.transform;
+                if (mb.GetType().Name == "PlayerAvatar")
+                {
+                    return ResolvePlayerRoot(mb.transform);
+                }
             }
 
-            // Fallback: PlayerHealth (often on the avatar controller root)
-            foreach (var mb in avatars)
+            // 2️⃣ Fallback: PlayerHealth
+            foreach (var mb in all)
             {
                 if (mb == null) continue;
-                if (!mb.gameObject.scene.IsValid()) continue;
+                var go = mb.gameObject;
+                if (go == null) continue;
+                if (!go.scene.IsValid()) continue;
 
-                var tn = mb.GetType().Name;
-                if (tn == "PlayerHealth")
-                    return mb.transform;
+                if (mb.GetType().Name == "PlayerHealth")
+                {
+                    return ResolvePlayerRoot(mb.transform);
+                }
             }
 
-            // Fallback: Local Camera (less ideal but usable)
-            foreach (var mb in avatars)
+            // 3️⃣ Fallback: PlayerLocalCamera
+            foreach (var mb in all)
             {
                 if (mb == null) continue;
-                if (!mb.gameObject.scene.IsValid()) continue;
+                var go = mb.gameObject;
+                if (go == null) continue;
+                if (!go.scene.IsValid()) continue;
 
-                var tn = mb.GetType().Name;
-                if (tn == "PlayerLocalCamera")
-                    return mb.transform;
+                if (mb.GetType().Name == "PlayerLocalCamera")
+                {
+                    return ResolvePlayerRoot(mb.transform);
+                }
             }
 
             return null;
         }
 
+        private Transform ResolvePlayerRoot(Transform t)
+        {
+            if (t == null) return null;
+
+            // Walk up the hierarchy looking for a known root
+            var cur = t;
+            for (int i = 0; i < 12 && cur != null; i++)
+            {
+                if (cur.name == "Player Avatar Controller")
+                    return cur;
+
+                cur = cur.parent;
             }
+
+            // Fallback: Unity root object
+            return t.root != null ? t.root : t;
+        }
+
+
+        private void DumpAllPlayerAvatarControllers()
+        {
+            int count = 0;
+            foreach (var mb in Resources.FindObjectsOfTypeAll<MonoBehaviour>())
+            {
+                if (mb == null) continue;
+                if (!mb.gameObject.scene.IsValid()) continue;
+
+                if (mb.GetType().Name == "PlayerAvatar")
+                {
+                    var go = mb.gameObject;
+                    Logger.LogInfo($"[{PluginName}] PlayerAvatar #{++count}: GO={go.name} pos={go.transform.position} scene={go.scene.name}");
+                }
+            }
+
+            Logger.LogInfo($"[{PluginName}] PlayerAvatar total found: {count}");
+        }
+
+
+    }
 }
