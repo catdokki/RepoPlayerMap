@@ -84,6 +84,14 @@ namespace RepoPlayerMap
                 {
                     _didSuccessfulScan = true;
                     Logger.LogInfo($"[{PluginName}] AutoScan SUCCESS ({hits} hits). Stopping autoscan.");
+
+                    // Attempt to find local player root after successful scan
+                    var root = TryFindLocalPlayerRoot();
+                    if (root != null)
+                        Logger.LogInfo($"[{PluginName}] LocalPlayerRoot = {root.name} pos={root.position}");
+                    else
+                        Logger.LogWarning($"[{PluginName}] LocalPlayerRoot NOT FOUND");
+
                 }
             }
             catch (Exception ex)
@@ -153,5 +161,52 @@ namespace RepoPlayerMap
             Logger.LogInfo("===== RepoPlayerMap: PLAYER OBJECT SCAN END =====");
             return totalHits;
         }
-    }
+
+        // Attempt to find the local player's root transform based on known component types
+        private Transform TryFindLocalPlayerRoot()
+        {
+            // Strong candidates based on your scan results:
+            // - PlayerAvatar (component)
+            // - PlayerHealth (component)
+            // - PlayerAccess (component)
+            // - PlayerLocalCamera (component)
+
+            // Prefer PlayerAvatar first
+            var avatars = Resources.FindObjectsOfTypeAll<MonoBehaviour>();
+            foreach (var mb in avatars)
+            {
+                if (mb == null) continue;
+                if (!mb.gameObject.scene.IsValid()) continue;
+
+                var tn = mb.GetType().Name;
+                if (tn == "PlayerAvatar")
+                    return mb.transform;
+            }
+
+            // Fallback: PlayerHealth (often on the avatar controller root)
+            foreach (var mb in avatars)
+            {
+                if (mb == null) continue;
+                if (!mb.gameObject.scene.IsValid()) continue;
+
+                var tn = mb.GetType().Name;
+                if (tn == "PlayerHealth")
+                    return mb.transform;
+            }
+
+            // Fallback: Local Camera (less ideal but usable)
+            foreach (var mb in avatars)
+            {
+                if (mb == null) continue;
+                if (!mb.gameObject.scene.IsValid()) continue;
+
+                var tn = mb.GetType().Name;
+                if (tn == "PlayerLocalCamera")
+                    return mb.transform;
+            }
+
+            return null;
+        }
+
+            }
 }
