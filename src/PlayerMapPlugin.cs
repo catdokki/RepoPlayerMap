@@ -2,6 +2,9 @@ using BepInEx;
 using UnityEngine;
 using UnityEngine.SceneManagement;
 using System;
+using UnityEngine.UI; 
+using System.Linq;
+
 
 namespace RepoPlayerMap
 {
@@ -10,7 +13,7 @@ namespace RepoPlayerMap
     {
         public const string PluginGuid = "catdokki.repo.playermap";
         public const string PluginName = "Repo Player Map";
-        public const string PluginVersion = "0.2.2";
+        public const string PluginVersion = "0.3.0";
 
         // Auto scan config
         private const float AutoScanIntervalSeconds = 5f;
@@ -19,6 +22,18 @@ namespace RepoPlayerMap
         private float _nextScanAt;
         private int _scanCount;
         private bool _didSuccessfulScan;
+
+
+        private Transform _localPlayerRoot;
+
+
+        private static Sprite _solidSprite;
+
+        private GameObject _marker;
+
+        private Transform _mapPlayerGraphicTf;
+
+
 
         private void Awake()
         {
@@ -67,45 +82,65 @@ namespace RepoPlayerMap
 
         private void Update()
         {
-            if (_didSuccessfulScan) return;
-            if (_scanCount >= MaxAutoScans) return;
-
-            if (Time.realtimeSinceStartup < _nextScanAt) return;
-
+            // Debug hotkey can always work
             if (Input.GetKeyDown(KeyCode.F8))
             {
                 Logger.LogInfo($"[{PluginName}] F8 pressed -> dumping all PlayerAvatars");
                 DumpAllPlayerAvatarControllers();
+                DumpPlayerIconCandidates();
+
             }
 
-
-            _scanCount++;
-            _nextScanAt = Time.realtimeSinceStartup + AutoScanIntervalSeconds;
-
-            Logger.LogInfo($"[{PluginName}] AutoScan tick #{_scanCount} (t={Time.realtimeSinceStartup:0.00})");
-
-            try
+            // ---- AUTOSCAN PHASE (runs until success or max scans) ----
+            if (!_didSuccessfulScan && _scanCount < MaxAutoScans && Time.realtimeSinceStartup >= _nextScanAt)
             {
-                int hits = DumpPlayerLikeObjects_ReturnHitCount();
-                if (hits > 0)
+                _scanCount++;
+                _nextScanAt = Time.realtimeSinceStartup + AutoScanIntervalSeconds;
+
+                Logger.LogInfo($"[{PluginName}] AutoScan tick #{_scanCount} (t={Time.realtimeSinceStartup:0.00})");
+
+                try
                 {
-                    _didSuccessfulScan = true;
-                    Logger.LogInfo($"[{PluginName}] AutoScan SUCCESS ({hits} hits). Stopping autoscan.");
+                    int hits = DumpPlayerLikeObjects_ReturnHitCount();
+                    if (hits > 0)
+                    {
+                        _didSuccessfulScan = true;
+                        Logger.LogInfo($"[{PluginName}] AutoScan SUCCESS ({hits} hits). Stopping autoscan.");
 
-                    // Attempt to find local player root after successful scan
-                    var root = TryFindLocalPlayerRoot();
-                    if (root != null)
-                        Logger.LogInfo($"[{PluginName}] LocalPlayerRoot = {root.name} pos={root.position}");
-                    else
-                        Logger.LogWarning($"[{PluginName}] LocalPlayerRoot NOT FOUND");
+                        _localPlayerRoot = TryFindLocalPlayerRoot();
+                        if (_localPlayerRoot != null)
+                            Logger.LogInfo($"[{PluginName}] LocalPlayerRoot = {_localPlayerRoot.name} pos={_localPlayerRoot.position}");
+                        else
+                            Logger.LogWarning($"[{PluginName}] LocalPlayerRoot NOT FOUND");
 
+                        EnsureMarker(); // ok to call even if player root not found yet
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError($"[{PluginName}] AutoScan exception: {ex}");
                 }
             }
-            catch (Exception ex)
-            {
-                Logger.LogError($"[{PluginName}] AutoScan exception: {ex}");
-            }
+
+            if (_myMarkerRT == null)
+                EnsureMarker();
+
+
         }
+
+        private void LateUpdate()
+        {
+            if (_myMarkerRT == null) return;
+            if (_playerIconTf == null) return;
+
+            var iconRT = _playerIconTf as RectTransform;
+            if (iconRT == null) return;
+
+            _myMarkerRT.anchoredPosition = iconRT.anchoredPosition;
+        }
+
+
+
 
         private int DumpPlayerLikeObjects_ReturnHitCount()
         {
@@ -291,6 +326,209 @@ namespace RepoPlayerMap
                 return true;
 
             return false;
+        }
+
+        private RectTransform _myMarkerRT;
+
+        private Transform _playerIconTf;
+
+        private void EnsureMarker()
+        {
+            if (_marker != null) return;
+
+            _mapPlayerGraphicTf = FindMapPlayerGraphic();
+            if (_mapPlayerGraphicTf == null)
+            {
+                Logger.LogWarning($"[{PluginName}] Map player graphic not found yet (Map/Active/Player/Player Graphic).");
+                return;
+            }
+
+            // Create a quad so it renders without Unity UI
+            _marker = GameObject.CreatePrimitive(PrimitiveType.Quad);
+            _marker.name = "RepoPlayerMarker_MapQuad";
+
+            // Parent it to the map player graphic
+            _marker.transform.SetParent(_mapPlayerGraphicTf, false);
+
+            // Put it slightly in front so it doesn't Z-fight / clip
+            _marker.transform.localPosition = new Vector3(0f, 0f, -0.05f);
+
+            // Big enough to see on the map (tweak if needed)
+            _marker.transform.localScale = new Vector3(0.25f, 0.25f, 1f);
+
+            // Remove collider so it doesn't interfere with anything
+            // var col = _marker.GetComponent<Collider>();
+            // if (col != null) Destroy(col);
+
+            // Make it red + unlit so lighting doesn't hide it
+            var r = _marker.GetComponent<Renderer>();
+            if (r != null)
+            {
+                var shader = Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default") ?? Shader.Find("Standard");
+                if (shader != null)
+                {
+                    r.material = new Material(shader);
+                    r.material.color = Color.red;
+                }
+                r.enabled = true;
+            }
+
+            // Match layer (important for map camera culling)
+            _marker.layer = _mapPlayerGraphicTf.gameObject.layer;
+
+            Logger.LogInfo($"[{PluginName}] Map quad marker created under '{_mapPlayerGraphicTf.name}' " +
+                        $"pos={_mapPlayerGraphicTf.position} layer={_marker.layer} path='{GetPath(_mapPlayerGraphicTf)}'");
+
+            DebugWhichCamerasCanSeeMarker();
+        }
+
+
+    private Transform FindMapPlayerGraphic()
+    {
+        foreach (var t in Resources.FindObjectsOfTypeAll<Transform>())
+        {
+            if (t == null) continue;
+            if (!t.gameObject.scene.IsValid()) continue;
+
+            if (t.name == "Player Graphic")
+            {
+                // Strong filter: must be inside Map/Active/Player
+                var path = GetPath(t);
+                if (path.StartsWith("Map/Active/Player/", StringComparison.OrdinalIgnoreCase) ||
+                    path.IndexOf("/Map/Active/Player/", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    return t;
+                }
+            }
+        }
+        return null;
+    }
+
+
+
+
+
+
+
+        private Transform FindMapLayerTransform()
+        {
+            foreach (var mb in Resources.FindObjectsOfTypeAll<MonoBehaviour>())
+            {
+                if (mb == null) continue;
+                if (!mb.gameObject.scene.IsValid()) continue;
+
+                if (mb.GetType().Name == "MapLayer")
+                {
+                    Logger.LogInfo($"[Repo Player Map] Found MapLayer on {mb.gameObject.name}");
+                    return mb.transform;
+                }
+            }
+
+            Logger.LogWarning("[Repo Player Map] MapLayer NOT found.");
+            return null;
+        }
+
+
+        private static Sprite GetSolidSprite()
+        {
+            if (_solidSprite != null) return _solidSprite;
+
+            var tex = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            tex.SetPixel(0, 0, Color.white);
+            tex.Apply();
+
+            _solidSprite = Sprite.Create(tex, new Rect(0, 0, 1, 1), new Vector2(0.5f, 0.5f));
+            return _solidSprite;
+        }
+
+
+        private void DebugWhichCamerasCanSeeMarker()
+        {
+            if (_marker == null) return;
+
+            var cams = Resources.FindObjectsOfTypeAll<Camera>();
+            foreach (var cam in cams)
+            {
+                if (cam == null) continue;
+                if (!cam.gameObject.scene.IsValid()) continue;
+
+                bool canSeeLayer = (cam.cullingMask & (1 << _marker.layer)) != 0;
+                if (canSeeLayer)
+                {
+                    Logger.LogInfo($"[{PluginName}] Camera '{cam.name}' CAN see marker layer {_marker.layer} | pos={cam.transform.position} enabled={cam.enabled} active={cam.gameObject.activeInHierarchy}");
+                }
+            }
+        }
+
+
+        private RectTransform FindExistingPlayerIconRT()
+        {
+            RectTransform best = null;
+
+            foreach (var t in Resources.FindObjectsOfTypeAll<Transform>())
+            {
+                if (t == null) continue;
+                if (!t.gameObject.scene.IsValid()) continue;
+
+                // Only consider the candidate names you know exist
+                if (t.name != "player_top" && t.name != "[PLAYER]" && t.name != "Player Graphic")
+                    continue;
+
+                var rt = t as RectTransform;
+                if (rt == null) continue;
+
+                var canvas = rt.GetComponentInParent<Canvas>(true);
+                var canvasName = canvas ? canvas.name : "(no canvas)";
+
+                // HARD REJECT: HUD (this is what your log shows you're hitting)
+                if (canvasName.IndexOf("HUD", StringComparison.OrdinalIgnoreCase) >= 0)
+                    continue;
+
+                // Prefer canvases that smell like map/minimap
+                bool looksLikeMap =
+                    canvasName.IndexOf("map", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    canvasName.IndexOf("minimap", StringComparison.OrdinalIgnoreCase) >= 0;
+
+                if (looksLikeMap)
+                    return rt; // best possible match
+
+                // fallback: keep the first non-HUD match if no map one exists yet
+                if (best == null)
+                    best = rt;
+            }
+
+            return best;
+        }
+
+
+        private void DumpPlayerIconCandidates()
+        {
+            Logger.LogInfo($"[{PluginName}] --- Player icon candidates ---");
+
+            foreach (var t in Resources.FindObjectsOfTypeAll<Transform>())
+            {
+                if (t == null) continue;
+                if (!t.gameObject.scene.IsValid()) continue;
+
+                if (t.name != "player_top" && t.name != "[PLAYER]" && t.name != "Player Graphic")
+                    continue;
+
+                var rt = t as RectTransform;
+                var canvas = t.GetComponentInParent<Canvas>(true);
+                var canvasName = canvas ? canvas.name : "(no canvas)";
+                Logger.LogInfo($"[{PluginName}] candidate '{t.name}' rect={(rt != null)} canvas='{canvasName}' path='{GetPath(t)}'");
+            }
+        }
+
+        private string GetPath(Transform t)
+        {
+            string path = t.name;
+            while (t.parent != null)
+            {
+                t = t.parent;
+                path = t.name + "/" + path;
+            }
+            return path;
         }
 
 
