@@ -10,7 +10,7 @@ namespace RepoPlayerMap
     {
         public const string PluginGuid = "catdokki.repo.playermap";
         public const string PluginName = "Repo Player Map";
-        public const string PluginVersion = "0.2.10";
+        public const string PluginVersion = "0.2.2";
 
         // Auto scan config
         private const float AutoScanIntervalSeconds = 5f;
@@ -185,7 +185,9 @@ namespace RepoPlayerMap
 
                 if (mb.GetType().Name == "PlayerAvatar")
                 {
-                    return ResolvePlayerRoot(mb.transform);
+                    var root = ResolvePlayerRoot(mb.transform);
+                    if (!IsJunkAvatar(root))
+                        return root;
                 }
             }
 
@@ -199,7 +201,9 @@ namespace RepoPlayerMap
 
                 if (mb.GetType().Name == "PlayerHealth")
                 {
-                    return ResolvePlayerRoot(mb.transform);
+                    var root = ResolvePlayerRoot(mb.transform);
+                    if (!IsJunkAvatar(root))
+                        return root;
                 }
             }
 
@@ -213,20 +217,23 @@ namespace RepoPlayerMap
 
                 if (mb.GetType().Name == "PlayerLocalCamera")
                 {
-                    return ResolvePlayerRoot(mb.transform);
+                    var root = ResolvePlayerRoot(mb.transform);
+                    if (!IsJunkAvatar(root))
+                        return root;
                 }
             }
 
             return null;
         }
 
+
         private Transform ResolvePlayerRoot(Transform t)
         {
             if (t == null) return null;
 
-            // Walk up the hierarchy looking for a known root
+            // Walk up until we hit the known root name
             var cur = t;
-            for (int i = 0; i < 12 && cur != null; i++)
+            while (cur != null)
             {
                 if (cur.name == "Player Avatar Controller")
                     return cur;
@@ -234,9 +241,10 @@ namespace RepoPlayerMap
                 cur = cur.parent;
             }
 
-            // Fallback: Unity root object
-            return t.root != null ? t.root : t;
+            // Fallback: return original transform
+            return t;
         }
+
 
 
         private void DumpAllPlayerAvatarControllers()
@@ -256,6 +264,36 @@ namespace RepoPlayerMap
 
             Logger.LogInfo($"[{PluginName}] PlayerAvatar total found: {count}");
         }
+
+
+        private bool IsJunkAvatar(Transform root)
+        {
+            if (root == null) return true;
+
+            var go = root.gameObject;
+
+            // Inactive = junk
+            if (!go.activeInHierarchy)
+                return true;
+
+            var pos = root.position;
+
+            // Menu / preview / pooled avatars
+            if (Mathf.Abs(pos.z) > 500f)
+                return true;
+
+            // UI or uninitialized placeholders
+            if (pos == Vector3.zero)
+                return true;
+
+            // Scene sanity check
+            if (!go.scene.IsValid())
+                return true;
+
+            return false;
+        }
+
+
 
 
     }
