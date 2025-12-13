@@ -25,3 +25,4 @@ thunderstore/RepoPlayerMap/BepInEx/plugins/*.dll
 # Don't upload dist build
 /dist/*
 
+RepoPlayerMap.sln

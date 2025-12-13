@@ -116,6 +116,15 @@
             <HintPath>$(RepoDir)\REPO_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
             <Private>false</Private>
         </Reference>
+
+        <Reference Include="UnityEngine.UI">
+            <HintPath>$(RepoDir)\REPO_Data\Managed\UnityEngine.UI.dll</HintPath>
+        </Reference>
+
+        <Reference Include="UnityEngine.UIModule">
+            <HintPath>$(RepoDir)\REPO_Data\Managed\UnityEngine.UIModule.dll</HintPath>
+        </Reference>
+
     </ItemGroup>
 
     <!-- Copy built DLL into Steam install (optional) -->
