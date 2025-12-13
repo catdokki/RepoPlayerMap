@@ -1,7 +1,7 @@
 using BepInEx;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using System;
-using System.Collections.Generic;
 
 namespace RepoPlayerMap
 {
@@ -10,186 +10,148 @@ namespace RepoPlayerMap
     {
         public const string PluginGuid = "catdokki.repo.playermap";
         public const string PluginName = "Repo Player Map";
-        public const string PluginVersion = "0.1.1";
+        public const string PluginVersion = "0.2.10";
 
-        // Map panel layout
-        private Rect _mapRect = new Rect(20f, 20f, 250f, 250f);
+        // Auto scan config
+        private const float AutoScanIntervalSeconds = 5f;
+        private const int MaxAutoScans = 30;
 
-        // Tweak this to match the scale of REPO’s world -> map
-        private float _mapScale = 0.05f;
-
-        private GUIStyle _labelStyle;
-        private Texture2D _circleTexture;
+        private float _nextScanAt;
+        private int _scanCount;
+        private bool _didSuccessfulScan;
 
         private void Awake()
         {
-            Logger.LogInfo($"Repo Player Map v{PluginVersion} loaded.");
-
-            // IMPORTANT: Do NOT touch GUI / GUI.skin / GUIStyle here.
-            // Only safe init (non-GUI) belongs in Awake.
-
-            // If you want, you can create textures here WITHOUT calling GUI.skin.
-            if (_circleTexture == null)
+            // Make THIS plugin object persistent
+            try
             {
-                _circleTexture = new Texture2D(1, 1);
-                _circleTexture.SetPixel(0, 0, Color.white);
-                _circleTexture.Apply();
+                // Important: call on the GameObject, not just component
+                DontDestroyOnLoad(gameObject);
+
+                // These flags often prevent “cleanup” systems from nuking it
+                gameObject.hideFlags = HideFlags.HideAndDontSave;
+
+                Logger.LogInfo($"[{PluginName}] Awake: marked persistent. GO={gameObject.name} scene={gameObject.scene.name} flags={gameObject.hideFlags}");
             }
+            catch (Exception ex)
+            {
+                Logger.LogError($"[{PluginName}] Awake: failed to mark persistent: {ex}");
+            }
+
+            // Subscribe to scene events (this also proves we stay alive)
+            SceneManager.sceneLoaded += OnSceneLoaded;
+
+            ArmScan("Startup");
         }
 
-
-        private void OnGUI()
+        private void OnDestroy()
         {
-            
-            EnsureGuiInitialized();
-
-            // Optional: only show when map is open in REPO
-            if (!IsMapOpen())
-                return;
-
-            GUI.Box(_mapRect, "Players");
-
-            // Get player info from REPO
-            List<PlayerInfo> players = FetchPlayers();
-            PlayerInfo? local = GetLocalPlayer(players);
-            if (local == null)
-                return;
-
-            Vector3 centerPos = local.Value.WorldPosition;
-
-            foreach (var p in players)
-            {
-                DrawPlayerDot(p, centerPos);
-            }
+            // If you see this early, we know the object is still getting killed.
+            Logger.LogWarning($"[{PluginName}] OnDestroy fired! GO={gameObject.name} scene={gameObject.scene.name}");
+            SceneManager.sceneLoaded -= OnSceneLoaded;
         }
-        
-        private void EnsureGuiInitialized()
+
+        private void OnSceneLoaded(Scene scene, LoadSceneMode mode)
         {
-            if (_labelStyle == null)
+            Logger.LogInfo($"[{PluginName}] SceneLoaded: {scene.name} mode={mode}");
+            ArmScan($"SceneLoaded:{scene.name}");
+        }
+
+        private void ArmScan(string reason)
+        {
+            _didSuccessfulScan = false;
+            _scanCount = 0;
+            _nextScanAt = Time.realtimeSinceStartup + 2f; // small delay
+            Logger.LogInfo($"[{PluginName}] Scan armed ({reason}). First scan at t={_nextScanAt:0.00}");
+        }
+
+        private void Update()
+        {
+            if (_didSuccessfulScan) return;
+            if (_scanCount >= MaxAutoScans) return;
+
+            if (Time.realtimeSinceStartup < _nextScanAt) return;
+
+            _scanCount++;
+            _nextScanAt = Time.realtimeSinceStartup + AutoScanIntervalSeconds;
+
+            Logger.LogInfo($"[{PluginName}] AutoScan tick #{_scanCount} (t={Time.realtimeSinceStartup:0.00})");
+
+            try
             {
-                _labelStyle = new GUIStyle(GUI.skin.label)
+                int hits = DumpPlayerLikeObjects_ReturnHitCount();
+                if (hits > 0)
                 {
-                    alignment = TextAnchor.MiddleCenter,
-                    fontStyle = FontStyle.Bold,
-                    fontSize = 12
-                };
-                _labelStyle.normal.textColor = Color.white;
+                    _didSuccessfulScan = true;
+                    Logger.LogInfo($"[{PluginName}] AutoScan SUCCESS ({hits} hits). Stopping autoscan.");
+                }
             }
-
-            if (_circleTexture == null)
+            catch (Exception ex)
             {
-                _circleTexture = new Texture2D(1, 1);
-                _circleTexture.SetPixel(0, 0, Color.white);
-                _circleTexture.Apply();
+                Logger.LogError($"[{PluginName}] AutoScan exception: {ex}");
             }
         }
 
-
-        private void DrawPlayerDot(PlayerInfo player, Vector3 centerPos)
+        private int DumpPlayerLikeObjects_ReturnHitCount()
         {
-            // Convert world to "map space" relative to local player
-            Vector3 delta = player.WorldPosition - centerPos;
-            float x = _mapRect.x + _mapRect.width / 2f + delta.x * _mapScale;
-            float y = _mapRect.y + _mapRect.height / 2f - delta.z * _mapScale; 
-            // Using z as “forward” in Unity
+            Logger.LogInfo("===== RepoPlayerMap: PLAYER OBJECT SCAN START =====");
 
-            // Clamp to panel bounds
-            if (x < _mapRect.x) x = _mapRect.x;
-            if (x > _mapRect.xMax) x = _mapRect.xMax;
-            if (y < _mapRect.y) y = _mapRect.y;
-            if (y > _mapRect.yMax) y = _mapRect.yMax;
+            int totalHits = 0;
 
-            const float radius = 10f;
-            Rect circleRect = new Rect(
-                x - radius,
-                y - radius,
-                radius * 2f,
-                radius * 2f
-            );
+            var behaviours = Resources.FindObjectsOfTypeAll<MonoBehaviour>();
+            int typeHits = 0;
 
-            // Draw colored circle-ish (square, but we can fake round)
-            Color prevColor = GUI.color;
-            GUI.color = player.Color;
-            GUI.DrawTexture(circleRect, _circleTexture);
-            GUI.color = prevColor;
-
-            // Draw initial
-            string initial = !string.IsNullOrEmpty(player.Name) ? player.Name.Substring(0, 1).ToUpper() : "?";
-            GUI.Label(circleRect, initial, _labelStyle);
-        }
-
-        #region REPO-SPECIFIC API (to implement with the actual SDK)
-
-        // Replace this with real player info from the REPO SDK
-        private List<PlayerInfo> FetchPlayers()
-        {
-            var result = new List<PlayerInfo>();
-
-            // TODO: Use REPO's multiplayer/player manager API here.
-            //
-            // Example pseudo-code if REPO exposes something like:
-            // foreach (var p in RepoGame.PlayerManager.AllPlayers)
-            // {
-            //     result.Add(new PlayerInfo
-            //     {
-            //         Name = p.DisplayName,
-            //         WorldPosition = p.Transform.position,
-            //         Color = GetColorForPlayer(p)
-            //     });
-            // }
-
-            // TEMP: Fake demo data (for testing in a blank scene)
-            // Remove this once you wire the real API.
-            /*
-            result.Add(new PlayerInfo
+            foreach (var mb in behaviours)
             {
-                Name = "You",
-                WorldPosition = Vector3.zero,
-                Color = Color.green
-            });
+                if (mb == null) continue;
+                if (mb.gameObject == null) continue;
+                if (!mb.gameObject.scene.IsValid()) continue;
 
-            result.Add(new PlayerInfo
+                var tn = mb.GetType().FullName ?? "";
+                if (tn.IndexOf("Player", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    tn.IndexOf("Character", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    tn.IndexOf("Avatar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    tn.IndexOf("Network", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    tn.IndexOf("Photon", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    var go = mb.gameObject;
+                    Logger.LogInfo($"TYPE HIT: {tn} | GO: {go.name} | ACTIVE={go.activeInHierarchy} | POS={go.transform.position}");
+                    typeHits++;
+                    if (typeHits >= 120) break;
+                }
+            }
+
+            Logger.LogInfo($"TYPE scan hits: {typeHits}");
+            totalHits += typeHits;
+
+            var transforms = Resources.FindObjectsOfTypeAll<Transform>();
+            int nameHits = 0;
+
+            foreach (var t in transforms)
             {
-                Name = "A",
-                WorldPosition = new Vector3(50f, 0f, 20f),
-                Color = Color.cyan
-            });
+                if (t == null) continue;
+                var go = t.gameObject;
+                if (go == null) continue;
+                if (!go.scene.IsValid()) continue;
 
-            result.Add(new PlayerInfo
-            {
-                Name = "B",
-                WorldPosition = new Vector3(-40f, 0f, -15f),
-                Color = Color.magenta
-            });
-            */
+                var n = go.name ?? "";
+                if (n.IndexOf("player", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    n.IndexOf("character", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    n.IndexOf("avatar", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    n.IndexOf("network", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                    n.IndexOf("photon", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    Logger.LogInfo($"NAME HIT: GO={go.name} | ACTIVE={go.activeInHierarchy} | POS={t.position}");
+                    nameHits++;
+                    if (nameHits >= 120) break;
+                }
+            }
 
-            return result;
+            Logger.LogInfo($"NAME scan hits: {nameHits}");
+            totalHits += nameHits;
+
+            Logger.LogInfo("===== RepoPlayerMap: PLAYER OBJECT SCAN END =====");
+            return totalHits;
         }
-
-        private PlayerInfo? GetLocalPlayer(List<PlayerInfo> players)
-        {
-            // TODO: Use REPO's concept of "local player".
-            // For now, just take the first one.
-            if (players.Count == 0)
-                return null;
-
-            return players[0];
-        }
-
-        private bool IsMapOpen()
-        {
-            // TODO: Hook into REPO's map UI states.
-            // For now, always true.
-            return true;
-        }
-
-        #endregion
-    }
-
-    public struct PlayerInfo
-    {
-        public string Name;
-        public Vector3 WorldPosition;
-        public Color Color;
     }
 }
