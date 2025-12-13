@@ -1,0 +1,27 @@
+# Build output
+src/bin/
+src/obj/
+bin/
+obj/
+
+# Local-only settings
+Directory.Build.props
+
+# IDE
+.vs/
+.vscode/
+*.user
+*.suo
+
+# OS junk
+.DS_Store
+Thumbs.db
+
+# Don't commit compiled DLLs inside the package folder
+thunderstore/*
+thunderstore/RepoPlayerMap/BepInEx/plugins/*.dll
+
+
+# Don't upload dist build
+/dist/*
+

@@ -1,0 +1,170 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>netstandard2.1</TargetFramework>
+        <LangVersion>latest</LangVersion>
+
+        <!-- Portable paths via env vars -->
+        <RepoDir Condition="'$(RepoDir)'==''">$(REPO_DIR)</RepoDir>
+        <TmmPluginsDir Condition="'$(TmmPluginsDir)'==''">$(TMM_PLUGINS_DIR)</TmmPluginsDir>
+
+        <!-- Copy toggles -->
+        <CopyToSteam Condition="'$(CopyToSteam)'==''">false</CopyToSteam>
+        <CopyToThunderstoreProfile Condition="'$(CopyToThunderstoreProfile)'==''">true</CopyToThunderstoreProfile>
+        <CopyToThunderstorePackage Condition="'$(CopyToThunderstorePackage)'==''">true</CopyToThunderstorePackage>
+        <CopyToThunderstoreZip Condition="'$(CopyToThunderstoreZip)'==''">true</CopyToThunderstoreZip>
+
+        <!-- Repo layout -->
+        <RepoRoot>$(MSBuildProjectDirectory)\..</RepoRoot>
+        <ThunderstoreDir>$(RepoRoot)\thunderstore</ThunderstoreDir>
+        <ThunderstoreRoot>$(ThunderstoreDir)\RepoPlayerMap</ThunderstoreRoot>
+        <ThunderstorePlugins>$(ThunderstoreRoot)\BepInEx\plugins</ThunderstorePlugins>
+
+        <!-- Canonical metadata at repo root -->
+        <CanonicalManifest>$(RepoRoot)\manifest.json</CanonicalManifest>
+        <CanonicalReadme>$(RepoRoot)\README.md</CanonicalReadme>
+        <CanonicalIcon>$(RepoRoot)\icon.png</CanonicalIcon>
+
+        <!-- Zip naming -->
+        <PackageName Condition="'$(PackageName)'==''">RepoPlayerMap</PackageName>
+        <!-- DO NOT set PackageVersion here; it is read from manifest.json -->
+        <PackageVersion></PackageVersion>
+
+        <!-- Output zip -->
+        <DistDir>$(RepoRoot)\dist</DistDir>
+        <ZipName>$(PackageName)-$(PackageVersion).zip</ZipName>
+        <ZipPath>$(DistDir)\$(ZipName)</ZipPath>
+    </PropertyGroup>
+
+    <!-- Validate install paths early -->
+    <Target Name="ValidatePaths" BeforeTargets="Build">
+        <Error Condition="'$(RepoDir)'==''"
+               Text="RepoDir is not set. Set env var REPO_DIR or build with -p:RepoDir=... (example: dotnet build -c Release -p:RepoDir=D:\SteamLibrary\steamapps\common\REPO)" />
+        <Error Condition="!Exists('$(RepoDir)\REPO_Data\Managed\UnityEngine.CoreModule.dll')"
+               Text="Could not find Unity DLLs at $(RepoDir). Expected: $(RepoDir)\REPO_Data\Managed\UnityEngine.CoreModule.dll" />
+        <Error Condition="!Exists('$(RepoDir)\BepInEx\core\BepInEx.dll')"
+               Text="Could not find BepInEx.dll at $(RepoDir). Expected: $(RepoDir)\BepInEx\core\BepInEx.dll" />
+    </Target>
+
+    <!-- Read version_number from repo-root manifest.json and set PackageVersion -->
+    <Target Name="ReadManifestVersion" BeforeTargets="Build">
+        <Error Condition="!Exists('$(CanonicalManifest)')"
+               Text="manifest.json not found at $(CanonicalManifest). Expected manifest.json at repo root." />
+
+        <!-- Ensure obj/... exists before PowerShell writes manifest_version.txt -->
+        <MakeDir Directories="$(IntermediateOutputPath)" Condition="!Exists('$(IntermediateOutputPath)')" />
+
+        <Exec Command='powershell -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference=&quot;Stop&quot;; $m = Get-Content -Raw &quot;$(CanonicalManifest)&quot; | ConvertFrom-Json; if (-not $m.version_number) { throw &quot;manifest.json missing version_number&quot; }; Set-Content -Path &quot;$(IntermediateOutputPath)manifest_version.txt&quot; -Value $m.version_number -NoNewline"' />
+
+        <ReadLinesFromFile File="$(IntermediateOutputPath)manifest_version.txt">
+            <Output TaskParameter="Lines" ItemName="__ManifestVersionLines" />
+        </ReadLinesFromFile>
+
+        <PropertyGroup>
+            <PackageVersion>@(__ManifestVersionLines)</PackageVersion>
+            <ZipName>$(PackageName)-$(PackageVersion).zip</ZipName>
+            <ZipPath>$(DistDir)\$(ZipName)</ZipPath>
+        </PropertyGroup>
+
+        <Message Importance="high" Text="Manifest version loaded: $(PackageVersion)" />
+    </Target>
+
+
+    <Target Name="SyncPluginVersionFromManifest" AfterTargets="ReadManifestVersion" BeforeTargets="Build">
+        <PropertyGroup>
+            <PluginFile>$(MSBuildProjectDirectory)\PlayerMapPlugin.cs</PluginFile>
+            <SyncScript>$(MSBuildProjectDirectory)\..\scripts\sync-version.ps1</SyncScript>
+        </PropertyGroup>
+
+        <Error Condition="!Exists('$(PluginFile)')" Text="PlayerMapPlugin.cs not found at $(PluginFile)" />
+        <Error Condition="!Exists('$(SyncScript)')" Text="sync-version.ps1 not found at $(SyncScript)" />
+
+        <Exec Command='powershell -NoProfile -ExecutionPolicy Bypass -File "$(SyncScript)" -PluginFile "$(PluginFile)" -Version "$(PackageVersion)"' />
+    </Target>
+
+
+
+    <ItemGroup>
+        <!-- BepInEx -->
+        <Reference Include="BepInEx">
+            <HintPath>$(RepoDir)\BepInEx\core\BepInEx.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+
+        <!-- Unity -->
+        <Reference Include="UnityEngine">
+            <HintPath>$(RepoDir)\REPO_Data\Managed\UnityEngine.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+
+        <Reference Include="UnityEngine.CoreModule">
+            <HintPath>$(RepoDir)\REPO_Data\Managed\UnityEngine.CoreModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+
+        <Reference Include="UnityEngine.IMGUIModule">
+            <HintPath>$(RepoDir)\REPO_Data\Managed\UnityEngine.IMGUIModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+
+        <Reference Include="UnityEngine.TextRenderingModule">
+            <HintPath>$(RepoDir)\REPO_Data\Managed\UnityEngine.TextRenderingModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+
+        <Reference Include="UnityEngine.InputLegacyModule">
+            <HintPath>$(RepoDir)\REPO_Data\Managed\UnityEngine.InputLegacyModule.dll</HintPath>
+            <Private>false</Private>
+        </Reference>
+    </ItemGroup>
+
+    <!-- Copy built DLL into Steam install (optional) -->
+    <Target Name="CopyToSteamPlugins" AfterTargets="Build" Condition="'$(CopyToSteam)'=='true'">
+        <PropertyGroup>
+            <SteamPluginsDir>$(RepoDir)\BepInEx\plugins</SteamPluginsDir>
+        </PropertyGroup>
+        <MakeDir Directories="$(SteamPluginsDir)" Condition="!Exists('$(SteamPluginsDir)')" />
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(SteamPluginsDir)" SkipUnchangedFiles="false" />
+        <Message Importance="high" Text="Copied plugin to Steam: $(SteamPluginsDir)" />
+    </Target>
+
+    <!-- Copy built DLL into Thunderstore profile plugins (only if path is provided) -->
+    <Target Name="CopyToThunderstoreProfile" AfterTargets="Build"
+            Condition="'$(CopyToThunderstoreProfile)'=='true' AND '$(TmmPluginsDir)'!=''">
+        <MakeDir Directories="$(TmmPluginsDir)" Condition="!Exists('$(TmmPluginsDir)')" />
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(TmmPluginsDir)" SkipUnchangedFiles="false" />
+        <Message Importance="high" Text="Copied plugin to TMM profile: $(TmmPluginsDir)" />
+    </Target>
+
+    <!-- Copy built DLL + canonical metadata into local Thunderstore packaging folder -->
+    <Target Name="CopyToThunderstorePackage" AfterTargets="Build" Condition="'$(CopyToThunderstorePackage)'=='true'">
+        <MakeDir Directories="$(ThunderstorePlugins)" Condition="!Exists('$(ThunderstorePlugins)')" />
+
+        <!-- DLL -->
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ThunderstorePlugins)" SkipUnchangedFiles="false" />
+
+        <!-- manifest/readme/icon -->
+        <Copy SourceFiles="$(CanonicalManifest)" DestinationFolder="$(ThunderstoreRoot)" SkipUnchangedFiles="false"
+              Condition="Exists('$(CanonicalManifest)')" />
+        <Copy SourceFiles="$(CanonicalReadme)" DestinationFolder="$(ThunderstoreRoot)" SkipUnchangedFiles="false"
+              Condition="Exists('$(CanonicalReadme)')" />
+        <Copy SourceFiles="$(CanonicalIcon)" DestinationFolder="$(ThunderstoreRoot)" SkipUnchangedFiles="false"
+              Condition="Exists('$(CanonicalIcon)')" />
+
+        <Message Importance="high" Text="Thunderstore folder updated: $(ThunderstoreRoot)" />
+    </Target>
+
+    <!-- Zip the Thunderstore package -->
+    <Target Name="PackThunderstoreZip"
+            DependsOnTargets="ReadManifestVersion;Build;CopyToThunderstorePackage"
+            Condition="'$(CopyToThunderstoreZip)'=='true'">
+
+        <MakeDir Directories="$(DistDir)" Condition="!Exists('$(DistDir)')" />
+        <Delete Files="$(ZipPath)" Condition="Exists('$(ZipPath)')" />
+
+        <Exec Command='powershell -NoProfile -ExecutionPolicy Bypass -Command "Set-StrictMode -Version Latest; $ErrorActionPreference = &quot;Stop&quot;; if (!(Test-Path &quot;$(ThunderstoreRoot)&quot;)) { throw &quot;Thunderstore package folder not found: $(ThunderstoreRoot)&quot; }; Push-Location &quot;$(ThunderstoreDir)&quot;; Compress-Archive -Path &quot;RepoPlayerMap&quot; -DestinationPath &quot;$(ZipPath)&quot; -Force; Pop-Location; Write-Host &quot;Created $(ZipPath)&quot;"' />
+
+        <Message Importance="high" Text="Created zip: $(ZipPath)" />
+    </Target>
+
+</Project>

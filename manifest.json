@@ -1,0 +1,10 @@
+﻿{
+  "name": "RepoPlayerMap",
+  "version_number": "0.1.1",
+  "author": "CatDokki",
+  "website_url": "https://github.com/catdokki/RepoPlayerMap",
+  "description": "Shows all players on the map with colored dots and initials.",
+  "dependencies": [
+    "BepInEx-BepInExPack_REPO-5.4.2300"
+  ]
+}
