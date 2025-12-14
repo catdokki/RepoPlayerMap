@@ -13,7 +13,7 @@ namespace RepoPlayerMap
     {
         public const string PluginGuid = "catdokki.repo.playermap";
         public const string PluginName = "Repo Player Map";
-        public const string PluginVersion = "0.3.1";
+        public const string PluginVersion = "0.3.2";
 
         // Auto scan config
         private const float AutoScanIntervalSeconds = 5f;
@@ -30,9 +30,6 @@ namespace RepoPlayerMap
         private static Sprite _solidSprite;
 
         private readonly System.Collections.Generic.Dictionary<int, GameObject> _markersByGraphic = new System.Collections.Generic.Dictionary<int, GameObject>();
-
-
-        private Transform _mapPlayerGraphicTf;
 
 
 
@@ -127,7 +124,6 @@ namespace RepoPlayerMap
                         else
                             Logger.LogWarning($"[{PluginName}] LocalPlayerRoot NOT FOUND");
 
-                        EnsureMarker(); // ok to call even if player root not found yet
                     }
                 }
                 catch (Exception ex)
