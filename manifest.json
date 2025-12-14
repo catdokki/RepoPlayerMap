@@ -1,6 +1,6 @@
 ﻿{
   "name": "RepoPlayerMap",
-  "version_number": "0.3.1",
+  "version_number": "0.3.2",
   "author": "CatDokki",
   "website_url": "https://github.com/catdokki/RepoPlayerMap",
   "description": "Shows all players on the map with colored dots and initials.",

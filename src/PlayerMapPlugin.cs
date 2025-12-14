@@ -29,7 +29,8 @@ namespace RepoPlayerMap
 
         private static Sprite _solidSprite;
 
-        private GameObject _marker;
+        private readonly System.Collections.Generic.Dictionary<int, GameObject> _markersByGraphic = new System.Collections.Generic.Dictionary<int, GameObject>();
+
 
         private Transform _mapPlayerGraphicTf;
 
@@ -82,12 +83,13 @@ namespace RepoPlayerMap
             _localPlayerRoot = null;
             _mapPlayerGraphicTf = null;
 
-            // ✅ kill old marker if it exists
-            if (_marker != null)
+            // ✅ kill ALL old markers
+            foreach (var kv in _markersByGraphic.Values)
             {
-                Destroy(_marker);
-                _marker = null;
+                if (kv != null) Destroy(kv);
             }
+            _markersByGraphic.Clear();
+
 
             Logger.LogInfo($"[{PluginName}] Scan armed ({reason}). First scan at t={_nextScanAt:0.00}");
         }
@@ -134,10 +136,10 @@ namespace RepoPlayerMap
                 }
             }
 
-            if (_marker == null)
-                EnsureMarker();
-                _marker.SetActive(true);
-                _marker.transform.localPosition = new Vector3(0f, 0f, -0.2f);
+            if (_markersByGraphic.Count == 0)
+                EnsureMarkersForAllMapGraphics();
+
+
 
 
 
@@ -330,77 +332,6 @@ namespace RepoPlayerMap
             return false;
         }
 
-        private void EnsureMarker()
-        {
-            if (_marker != null) return;
-
-            _mapPlayerGraphicTf = FindMapPlayerGraphic();
-            if (_mapPlayerGraphicTf == null)
-            {
-                Logger.LogWarning($"[{PluginName}] Map player graphic not found yet (Map/Active/Player/Player Graphic).");
-                return;
-            }
-
-            // Create a quad so it renders without Unity UI
-            _marker = GameObject.CreatePrimitive(PrimitiveType.Quad);
-            _marker.name = "RepoPlayerMarker_MapQuad";
-
-            // Parent it to the map player graphic
-            _marker.transform.SetParent(_mapPlayerGraphicTf, false);
-
-            // Put it slightly in front so it doesn't Z-fight / clip
-            _marker.transform.localPosition = new Vector3(0f, 0f, -0.05f);
-
-            // Big enough to see on the map (tweak if needed)
-            _marker.transform.localScale = new Vector3(0.25f, 0.25f, 1f);
-
-            // Remove collider so it doesn't interfere with anything
-            // var col = _marker.GetComponent<Collider>();
-            // if (col != null) Destroy(col);
-
-            // Make it red + unlit so lighting doesn't hide it
-            var r = _marker.GetComponent<Renderer>();
-            if (r != null)
-            {
-                var shader = Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default") ?? Shader.Find("Standard");
-                if (shader != null)
-                {
-                    r.material = new Material(shader);
-                    r.material.color = Color.red;
-                }
-                r.enabled = true;
-            }
-
-            // Match layer (important for map camera culling)
-            _marker.layer = _mapPlayerGraphicTf.gameObject.layer;
-
-            Logger.LogInfo($"[{PluginName}] Map quad marker created under '{_mapPlayerGraphicTf.name}' " +
-                        $"pos={_mapPlayerGraphicTf.position} layer={_marker.layer} path='{GetPath(_mapPlayerGraphicTf)}'");
-
-            DebugWhichCamerasCanSeeMarker();
-        }
-
-
-        private Transform FindMapPlayerGraphic()
-        {
-            foreach (var t in Resources.FindObjectsOfTypeAll<Transform>())
-            {
-                if (t == null) continue;
-                if (!t.gameObject.scene.IsValid()) continue;
-
-                if (t.name == "Player Graphic")
-                {
-                    // Strong filter: must be inside Map/Active/Player
-                    var path = GetPath(t);
-                    if (path.StartsWith("Map/Active/Player/", StringComparison.OrdinalIgnoreCase) ||
-                        path.IndexOf("/Map/Active/Player/", StringComparison.OrdinalIgnoreCase) >= 0)
-                    {
-                        return t;
-                    }
-                }
-            }
-            return null;
-        }
 
         private Transform FindMapLayerTransform()
         {
@@ -434,9 +365,9 @@ namespace RepoPlayerMap
         }
 
 
-        private void DebugWhichCamerasCanSeeMarker()
+        private void DebugWhichCamerasCanSeeMarker(GameObject marker)
         {
-            if (_marker == null) return;
+            if (marker == null) return;
 
             var cams = Resources.FindObjectsOfTypeAll<Camera>();
             foreach (var cam in cams)
@@ -444,13 +375,14 @@ namespace RepoPlayerMap
                 if (cam == null) continue;
                 if (!cam.gameObject.scene.IsValid()) continue;
 
-                bool canSeeLayer = (cam.cullingMask & (1 << _marker.layer)) != 0;
+                bool canSeeLayer = (cam.cullingMask & (1 << marker.layer)) != 0;
                 if (canSeeLayer)
                 {
-                    Logger.LogInfo($"[{PluginName}] Camera '{cam.name}' CAN see marker layer {_marker.layer} | pos={cam.transform.position} enabled={cam.enabled} active={cam.gameObject.activeInHierarchy}");
+                    Logger.LogInfo($"[{PluginName}] Camera '{cam.name}' CAN see marker layer {marker.layer} | pos={cam.transform.position} enabled={cam.enabled} active={cam.gameObject.activeInHierarchy}");
                 }
             }
         }
+
 
         private string GetPath(Transform t)
         {
@@ -462,6 +394,71 @@ namespace RepoPlayerMap
             }
             return path;
         }
+
+        // We will attempt to find every player graphic 
+        private Transform[] FindAllMapPlayerGraphics()
+        {
+            return Resources.FindObjectsOfTypeAll<Transform>()
+                .Where(t => t != null
+                    && t.gameObject.scene.IsValid()
+                    && t.name == "Player Graphic"
+                    && GetPath(t).IndexOf("Map/Active/", StringComparison.OrdinalIgnoreCase) >= 0)
+                .ToArray();
+        }
+
+        // Dump logger for all map players.
+        private void DumpAllMapPlayerGraphics()
+        {
+            var found = FindAllMapPlayerGraphics();
+            Logger.LogInfo($"[{PluginName}] Map Player Graphic count={found.Length}");
+            foreach (var t in found)
+                Logger.LogInfo($"[{PluginName}] MapGraphic: active={t.gameObject.activeInHierarchy} path='{GetPath(t)}' layer={t.gameObject.layer}");
+        }
+
+
+        private void EnsureMarkersForAllMapGraphics()
+        {
+            var graphics = FindAllMapPlayerGraphics();
+            if (graphics.Length == 0)
+            {
+                Logger.LogWarning($"[{PluginName}] No map Player Graphics found yet.");
+                return;
+            }
+
+            foreach (var g in graphics)
+            {
+                int key = g.GetInstanceID();
+                if (_markersByGraphic.ContainsKey(key)) continue;
+
+                var marker = GameObject.CreatePrimitive(PrimitiveType.Quad);
+                marker.name = $"RepoPlayerMarker_{key}";
+                marker.transform.SetParent(g, false);
+
+                marker.transform.localPosition = new Vector3(0f, 0f, -0.2f);
+                marker.transform.localScale = new Vector3(0.25f, 0.25f, 1f);
+
+                // Color
+                var r = marker.GetComponent<Renderer>();
+                if (r != null)
+                {
+                    var shader = Shader.Find("Unlit/Color") ?? Shader.Find("Sprites/Default") ?? Shader.Find("Standard");
+                    if (shader != null)
+                    {
+                        r.material = new Material(shader);
+                        r.material.color = Color.red;
+                    }
+                    r.enabled = true;
+                }
+
+                marker.layer = g.gameObject.layer;
+                marker.SetActive(true);
+
+                _markersByGraphic[key] = marker;
+
+                Logger.LogInfo($"[{PluginName}] Added marker for map graphic path='{GetPath(g)}'");
+            }
+        }
+
 
 
 
