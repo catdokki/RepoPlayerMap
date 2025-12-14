@@ -13,7 +13,7 @@ namespace RepoPlayerMap
     {
         public const string PluginGuid = "catdokki.repo.playermap";
         public const string PluginName = "Repo Player Map";
-        public const string PluginVersion = "0.3.0";
+        public const string PluginVersion = "0.3.1";
 
         // Auto scan config
         private const float AutoScanIntervalSeconds = 5f;
@@ -76,9 +76,22 @@ namespace RepoPlayerMap
         {
             _didSuccessfulScan = false;
             _scanCount = 0;
-            _nextScanAt = Time.realtimeSinceStartup + 2f; // small delay
+            _nextScanAt = Time.realtimeSinceStartup + 2f;
+
+            // ✅ reset cached references on scene changes
+            _localPlayerRoot = null;
+            _mapPlayerGraphicTf = null;
+
+            // ✅ kill old marker if it exists
+            if (_marker != null)
+            {
+                Destroy(_marker);
+                _marker = null;
+            }
+
             Logger.LogInfo($"[{PluginName}] Scan armed ({reason}). First scan at t={_nextScanAt:0.00}");
         }
+
 
         private void Update()
         {
@@ -87,7 +100,6 @@ namespace RepoPlayerMap
             {
                 Logger.LogInfo($"[{PluginName}] F8 pressed -> dumping all PlayerAvatars");
                 DumpAllPlayerAvatarControllers();
-                DumpPlayerIconCandidates();
 
             }
 
@@ -122,24 +134,14 @@ namespace RepoPlayerMap
                 }
             }
 
-            if (_myMarkerRT == null)
+            if (_marker == null)
                 EnsureMarker();
+                _marker.SetActive(true);
+                _marker.transform.localPosition = new Vector3(0f, 0f, -0.2f);
+
 
 
         }
-
-        private void LateUpdate()
-        {
-            if (_myMarkerRT == null) return;
-            if (_playerIconTf == null) return;
-
-            var iconRT = _playerIconTf as RectTransform;
-            if (iconRT == null) return;
-
-            _myMarkerRT.anchoredPosition = iconRT.anchoredPosition;
-        }
-
-
 
 
         private int DumpPlayerLikeObjects_ReturnHitCount()
@@ -328,10 +330,6 @@ namespace RepoPlayerMap
             return false;
         }
 
-        private RectTransform _myMarkerRT;
-
-        private Transform _playerIconTf;
-
         private void EnsureMarker()
         {
             if (_marker != null) return;
@@ -383,32 +381,26 @@ namespace RepoPlayerMap
         }
 
 
-    private Transform FindMapPlayerGraphic()
-    {
-        foreach (var t in Resources.FindObjectsOfTypeAll<Transform>())
+        private Transform FindMapPlayerGraphic()
         {
-            if (t == null) continue;
-            if (!t.gameObject.scene.IsValid()) continue;
-
-            if (t.name == "Player Graphic")
+            foreach (var t in Resources.FindObjectsOfTypeAll<Transform>())
             {
-                // Strong filter: must be inside Map/Active/Player
-                var path = GetPath(t);
-                if (path.StartsWith("Map/Active/Player/", StringComparison.OrdinalIgnoreCase) ||
-                    path.IndexOf("/Map/Active/Player/", StringComparison.OrdinalIgnoreCase) >= 0)
+                if (t == null) continue;
+                if (!t.gameObject.scene.IsValid()) continue;
+
+                if (t.name == "Player Graphic")
                 {
-                    return t;
+                    // Strong filter: must be inside Map/Active/Player
+                    var path = GetPath(t);
+                    if (path.StartsWith("Map/Active/Player/", StringComparison.OrdinalIgnoreCase) ||
+                        path.IndexOf("/Map/Active/Player/", StringComparison.OrdinalIgnoreCase) >= 0)
+                    {
+                        return t;
+                    }
                 }
             }
+            return null;
         }
-        return null;
-    }
-
-
-
-
-
-
 
         private Transform FindMapLayerTransform()
         {
@@ -457,66 +449,6 @@ namespace RepoPlayerMap
                 {
                     Logger.LogInfo($"[{PluginName}] Camera '{cam.name}' CAN see marker layer {_marker.layer} | pos={cam.transform.position} enabled={cam.enabled} active={cam.gameObject.activeInHierarchy}");
                 }
-            }
-        }
-
-
-        private RectTransform FindExistingPlayerIconRT()
-        {
-            RectTransform best = null;
-
-            foreach (var t in Resources.FindObjectsOfTypeAll<Transform>())
-            {
-                if (t == null) continue;
-                if (!t.gameObject.scene.IsValid()) continue;
-
-                // Only consider the candidate names you know exist
-                if (t.name != "player_top" && t.name != "[PLAYER]" && t.name != "Player Graphic")
-                    continue;
-
-                var rt = t as RectTransform;
-                if (rt == null) continue;
-
-                var canvas = rt.GetComponentInParent<Canvas>(true);
-                var canvasName = canvas ? canvas.name : "(no canvas)";
-
-                // HARD REJECT: HUD (this is what your log shows you're hitting)
-                if (canvasName.IndexOf("HUD", StringComparison.OrdinalIgnoreCase) >= 0)
-                    continue;
-
-                // Prefer canvases that smell like map/minimap
-                bool looksLikeMap =
-                    canvasName.IndexOf("map", StringComparison.OrdinalIgnoreCase) >= 0 ||
-                    canvasName.IndexOf("minimap", StringComparison.OrdinalIgnoreCase) >= 0;
-
-                if (looksLikeMap)
-                    return rt; // best possible match
-
-                // fallback: keep the first non-HUD match if no map one exists yet
-                if (best == null)
-                    best = rt;
-            }
-
-            return best;
-        }
-
-
-        private void DumpPlayerIconCandidates()
-        {
-            Logger.LogInfo($"[{PluginName}] --- Player icon candidates ---");
-
-            foreach (var t in Resources.FindObjectsOfTypeAll<Transform>())
-            {
-                if (t == null) continue;
-                if (!t.gameObject.scene.IsValid()) continue;
-
-                if (t.name != "player_top" && t.name != "[PLAYER]" && t.name != "Player Graphic")
-                    continue;
-
-                var rt = t as RectTransform;
-                var canvas = t.GetComponentInParent<Canvas>(true);
-                var canvasName = canvas ? canvas.name : "(no canvas)";
-                Logger.LogInfo($"[{PluginName}] candidate '{t.name}' rect={(rt != null)} canvas='{canvasName}' path='{GetPath(t)}'");
             }
         }
 
