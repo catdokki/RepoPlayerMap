@@ -78,7 +78,6 @@ namespace RepoPlayerMap
 
             // ✅ reset cached references on scene changes
             _localPlayerRoot = null;
-            _mapPlayerGraphicTf = null;
 
             // ✅ kill ALL old markers
             foreach (var kv in _markersByGraphic.Values)
